@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Meta tags for proper HTML5 rendering and responsive design -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Clipper with WaveSurfer</title>
+    <style>
+        /* Waveform container styling */
+        #waveform {
+            width: 100%;
+            height: 150px;
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            position: relative; /* Required for region positioning */
+        }
+        
+        /* Control buttons container */
+        #controls {
+            margin-top: 20px;
+        }
+        
+        /* Time display styling */
+        #time-display {
+            margin-top: 10px;
+        }
+
+        /* Region styling for visual feedback */
+        .region {
+            border: 2px solid #333;
+        }
+        
+        /* Region handle styling for resize controls */
+        .region-handle {
+            background-color: #333;
+            width: 4px;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <!-- Main application title -->
+    <h1>Audio Clipper with WaveSurfer</h1>
+    
+    <!-- User instructions section -->
+    <div style="margin-bottom: 20px; padding: 10px; background-color: #f0f0f0; border-radius: 5px;">
+        <p><strong>Instructions:</strong></p>
+        <ul>
+            <li>Enter a Track ID and click "Get Audio" to load audio</li>
+            <li>Drag region handles to resize, drag region body to move</li>
+            <li>Click "Play Selected Region" to play only the selected segment</li>
+        </ul>
+    </div>
+    
+    <!-- Audio input section - Track ID input and fetch button -->
+    <div>
+        <label for="track_id">Enter Track ID: </label>
+        <input type="text" id="track_id" />
+        <button onclick="getAudioUrl()">Get Audio</button>
+    </div>
+
+    <!-- WaveSurfer.js waveform container -->
+    <div id="waveform"></div>
+    
+    <!-- Audio playback control buttons -->
+    <div id="controls">
+        <button onclick="togglePlayPause()">Play/Pause</button>
+        <button onclick="stopAudio()">Stop</button>
+        <button onclick="playRegion()">Play Selected Region</button>
+    </div>
+
+    <!-- Time display showing current and total duration -->
+    <div id="time-display">Current Time: <span id="current-time">0.00</span> / <span id="total-time">0.00</span></div>
+
+    <!-- External libraries - WaveSurfer.js and Regions plugin -->
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+    
+    <!-- Library loading verification script -->
+    <script>
+        // Verify that WaveSurfer.js and Regions plugin are properly loaded
+        console.log('WaveSurfer loaded:', typeof WaveSurfer !== 'undefined');
+        console.log('WaveSurfer.Regions loaded:', typeof WaveSurfer !== 'undefined' && WaveSurfer.Regions);
+    </script>
+
+    <!-- Main application JavaScript -->
+    <script>
+        // Global variables for WaveSurfer instance and audio state
+        let wavesurfer;           // WaveSurfer.js instance
+        let audioUrl = '';        // Current audio file URL
+        let startTime = 0;        // Region start time in seconds
+        let endTime = 0;          // Region end time in seconds
+        let currentRegion = null; // Reference to the single region object
+
+        /**
+         * Clean up previous WaveSurfer instance to prevent memory leaks
+         * and ensure clean initialization of new instances
+         */
+        function destroyWaveSurfer() {
+            if (wavesurfer) {
+                wavesurfer.destroy();  // Properly destroy the existing instance
+                console.log('Previous WaveSurfer instance destroyed.');
+            }
+        }
+
+        /**
+         * Initialize WaveSurfer.js with the provided audio URL
+         * Sets up the waveform display, regions plugin, and event handlers
+         */
+        function initWaveform(audioUrl) {
+            console.log('Initializing waveform with URL:', audioUrl);
+
+            // Clean up any existing WaveSurfer instance
+            destroyWaveSurfer();
+
+            // Verify the waveform container exists in the DOM
+            const waveformContainer = document.getElementById('waveform');
+            if (!waveformContainer) {
+                console.error('Waveform container not found!');
+                return;
+            }
+            
+            // Create and configure the WaveSurfer instance
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform',    // DOM element to render waveform
+                waveColor: 'violet',       // Color of the waveform bars
+                progressColor: 'purple',   // Color of the progress bar
+                cursorColor: 'navy',       // Color of the playback cursor
+                cursorWidth: 2,            // Width of the cursor line
+                height: 150,               // Height of the waveform in pixels
+                barWidth: 2,               // Width of each waveform bar
+                barHeight: 1,              // Height scaling of waveform bars
+                responsive: true,          // Make waveform responsive to container size
+                interact: true             // Enable user interactions
+            });
+            
+            // Register the Regions plugin for creating selectable regions
+            const regionsPlugin = wavesurfer.registerPlugin(WaveSurfer.Regions.create({
+                dragSelection: false // Disable drag selection to prevent multiple regions
+            }));
+            console.log('WaveSurfer Regions plugin:', WaveSurfer.Regions);
+            console.log('WaveSurfer plugins:', wavesurfer.plugins);
+            console.log('WaveSurfer version:', WaveSurfer.version);
+            
+            // Verify regions plugin is working correctly
+            setTimeout(() => {
+                if (regionsPlugin) {
+                    console.log('Regions plugin is loaded and available');
+                    console.log('Available regions:', regionsPlugin.list);
+                } else {
+                    console.error('Regions plugin not found!');
+                }
+            }, 1000);
+
+
+
+            // Load the audio file into WaveSurfer for processing
+            wavesurfer.load(audioUrl);
+
+            // Event handler for when audio is loaded and waveform is ready
+            wavesurfer.on('ready', () => {
+                const duration = wavesurfer.getDuration();
+                document.getElementById('total-time').textContent = duration.toFixed(2);
+                
+                // Create a default region (0-10 seconds or full duration if shorter)
+                currentRegion = regionsPlugin.addRegion({
+                    start: 0,                                    // Start at beginning
+                    end: Math.min(10, duration),                 // End at 10s or duration, whichever is shorter
+                    color: 'rgba(0, 255, 0, 0.3)',              // Semi-transparent green
+                    drag: true,                                  // Allow dragging the region
+                    resize: true                                 // Allow resizing the region
+                });
+                
+                // Initialize the global time variables
+                startTime = currentRegion.start;
+                endTime = currentRegion.end;
+                
+                console.log('Default region created:', currentRegion);
+                console.log('Regions plugin available:', wavesurfer.plugins.regions);
+            });
+
+            // Update the current time display during playback
+            wavesurfer.on('audioprocess', () => {
+                document.getElementById('current-time').textContent = wavesurfer.getCurrentTime().toFixed(2);
+            });
+
+            // Event handler for when region is moved or resized
+            wavesurfer.on('region-updated', function(region) {
+                startTime = region.start;
+                endTime = region.end;
+                console.log('Region updated from', startTime, 'to', endTime);
+            });
+
+            // Event handlers for region interactions (for debugging)
+            wavesurfer.on('region-click', function(region) {
+                console.log('Region clicked:', region);
+            });
+
+            wavesurfer.on('region-dblclick', function(region) {
+                console.log('Region double-clicked:', region);
+            });
+
+            wavesurfer.on('region-in', function(region) {
+                console.log('Entered region:', region);
+            });
+
+            wavesurfer.on('region-out', function(region) {
+                console.log('Left region:', region);
+            });
+        }
+
+        /**
+         * Toggle between play and pause states
+         * Checks current state and switches accordingly
+         */
+        function togglePlayPause() {
+            if (wavesurfer.isPlaying()) {
+                wavesurfer.pause(); // Pause the audio if it's currently playing
+            } else {
+                wavesurfer.play();  // Play the audio if it's currently paused
+            }
+        }
+
+        /**
+         * Stop audio playback and reset to the beginning
+         * Stops the audio and seeks to position 0
+         */
+        function stopAudio() {
+            wavesurfer.stop();     // Stop the audio playback
+            wavesurfer.seekTo(0);  // Reset the playback position to the start
+        }
+
+        /**
+         * Play only the selected region of audio
+         * Validates the region exists and has valid time range
+         */
+        function playRegion() {
+            if (!currentRegion) {
+                alert("No region available. Please load audio first.");
+                return;
+            }
+
+            // Get the current region boundaries
+            startTime = currentRegion.start;
+            endTime = currentRegion.end;
+
+            // Validate that the region has a valid time range
+            if (startTime >= endTime) {
+                alert("Invalid region. Start time must be less than end time.");
+                return;
+            }
+
+            console.log('Playing region from', startTime, 'to', endTime);
+            
+            // Seek to the region start and play until the region end
+            wavesurfer.seekTo(startTime / wavesurfer.getDuration());
+            wavesurfer.play(startTime, endTime);
+        }
+
+        /**
+         * Fetch audio URL from the backend API
+         * Makes a request to the Flask backend to get the signed URL for the track
+         */
+        function getAudioUrl() {
+            const trackId = document.getElementById('track_id').value;
+            if (!trackId) {
+                alert("Please enter a Track ID");
+                return;
+            }
+
+            // Make API request to Flask backend
+            fetch(`/audio/${trackId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.signed_url) {
+                        audioUrl = data.signed_url;
+                        console.log('Received audio URL:', audioUrl);
+
+                        // Initialize the waveform with the received audio URL
+                        initWaveform(audioUrl);
+                    } else {
+                        alert("Error: No signed URL returned");
+                    }
+                })
+                .catch(error => {
+                    console.error("Error fetching audio URL:", error);
+                    alert("Error fetching audio URL.");
+                });
+        }
+
+    </script>
+</body>
+</html>
